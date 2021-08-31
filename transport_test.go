@@ -49,6 +49,16 @@ rezRkSNbJ8cqt9XQS+NNJ6Xwzl3EbuAt6r8f8VO1TIdRgFOgiUXRVNZ3ZyW8Hegd
 kGTL0A6/0yAu9qQZlFbaD5bWhQo7eyx63u4hZGppBhkTSPikOYUPCH8=
 -----END RSA PRIVATE KEY-----`)
 
+var testTokenSource TokenSource
+
+func init() {
+	appTransport, err := NewAppsTransport(http.DefaultTransport, appID, key)
+	if err != nil {
+		panic(err)
+	}
+	testTokenSource = NewReuseTokenSource(appTransport)
+}
+
 func TestNew(t *testing.T) {
 	var authed bool
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -58,7 +68,7 @@ func TestNew(t *testing.T) {
 		switch r.RequestURI {
 		case fmt.Sprintf("/app/installations/%d/access_tokens", installationID):
 			// respond with any token to installation transport
-			js, _ := json.Marshal(accessToken{
+			js, _ := json.Marshal(AccessToken{
 				Token:     token,
 				ExpiresAt: time.Now().Add(5 * time.Minute),
 			})
@@ -74,38 +84,13 @@ func TestNew(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	tr, err := New(&http.Transport{}, appID, installationID, key)
+	tr, err := New(&http.Transport{}, appID, installationID, key, testTokenSource)
 	if err != nil {
 		t.Fatal("unexpected error:", err)
 	}
 	tr.BaseURL = ts.URL
 
 	client := http.Client{Transport: tr}
-	_, err = client.Get(ts.URL + "/auth/with/installation/token/endpoint")
-	if err != nil {
-		t.Fatal("unexpected error from client:", err)
-	}
-
-	if !authed {
-		t.Fatal("Expected fetch of access_token but none occurred")
-	}
-
-	// Check the token is reused by setting expires into far future
-	tr.token.ExpiresAt = time.Now().Add(time.Hour)
-	authed = false
-
-	_, err = client.Get(ts.URL + "/auth/with/installation/token/endpoint")
-	if err != nil {
-		t.Fatal("unexpected error from client:", err)
-	}
-
-	if authed {
-		t.Fatal("Unexpected fetch of access_token")
-	}
-
-	// Check the token is refreshed by setting expires into far past
-	tr.token.ExpiresAt = time.Unix(0, 0)
-
 	_, err = client.Get(ts.URL + "/auth/with/installation/token/endpoint")
 	if err != nil {
 		t.Fatal("unexpected error from client:", err)
@@ -130,7 +115,7 @@ func TestNewKeyFromFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = NewKeyFromFile(&http.Transport{}, appID, installationID, tmpfile.Name())
+	_, err = NewKeyFromFile(&http.Transport{}, appID, installationID, tmpfile.Name(), testTokenSource)
 	if err != nil {
 		t.Fatal("unexpected error:", err)
 	}
@@ -152,7 +137,7 @@ func TestNew_appendHeader(t *testing.T) {
 	}
 	req.Header.Add("Accept", myheader)
 
-	tr, err := New(&http.Transport{}, appID, installationID, key)
+	tr, err := New(&http.Transport{}, appID, installationID, key, testTokenSource)
 	if err != nil {
 		t.Fatal("unexpected error:", err)
 	}
@@ -212,7 +197,7 @@ func TestRefreshTokenWithParameters(t *testing.T) {
 			}
 
 			// Return acceptable access token.
-			accessToken := accessToken{
+			accessToken := AccessToken{
 				Token:     "token_string",
 				ExpiresAt: time.Now(),
 				Repositories: []github.Repository{{
@@ -235,7 +220,7 @@ func TestRefreshTokenWithParameters(t *testing.T) {
 		},
 	}
 
-	tr, err := New(roundTripper, appID, installationID, key)
+	tr, err := New(roundTripper, appID, installationID, key, testTokenSource)
 	if err != nil {
 		t.Fatal("unexpected error:", err)
 	}
